@@ -100,7 +100,7 @@ class StateBonus(gym.core.Wrapper):
 
 class ImgObsWrapper(gym.core.ObservationWrapper):
     """
-    Use the image as the only observation output, no language/mission.
+    Use the image as the only observation output, no language/mission/direction.
     """
 
     def __init__(self, env):
@@ -342,14 +342,54 @@ class DirectionObsWrapper(gym.core.ObservationWrapper):
     
     def reset(self):
         obs = self.env.reset()
-        if not self.goal_position: 
-            self.goal_position = [x for x,y in enumerate(self.grid.grid) if isinstance(y,(Goal) ) ]
-            if len(self.goal_position) >= 1: # in case there are multiple goals , needs to be handled for other env types
-                self.goal_position = (int(self.goal_position[0]/self.height) , self.goal_position[0]%self.width)
-        return obs
+        self.goal_position = [x for x,y in enumerate(self.grid.grid) if isinstance(y,(Goal) ) ]
+        assert len(self.goal_position) >= 1, 'No goal position found'
+        # Take first goal. In case there are multiple goals , needs to be handled for other env types
+        self.goal_position = (int(self.goal_position[0]/self.height) , self.goal_position[0]%self.width)    
+        
+        env = self.unwrapped
+        angle = np.arctan2( self.goal_position[0] - env.agent_pos[1] ,  self.goal_position[1] - env.agent_pos[0])  
+        angle -= np.pi * env.agent_dir / 2       
+        # print(np.degrees(angle))
+        return {
+            'image': obs['image'],
+            'goal_direction': np.cos(angle)
+        }
         
     def observation(self, obs):
-        slope = np.divide( self.goal_position[1] - self.agent_pos[1] ,  self.goal_position[0] - self.agent_pos[0]) 
-        obs['goal_direction'] = np.arctan( slope ) if self.type == 'angle' else slope
-        return obs
-        
+        env = self.unwrapped
+        # print(env.agent_pos)
+        # print(self.goal_position)
+        angle = np.arctan2( self.goal_position[0] - env.agent_pos[1] ,  self.goal_position[1] - env.agent_pos[0]) 
+        angle -= np.pi * env.agent_dir / 2
+        # print(np.degrees(angle))
+        return {
+            'image': obs['image'],
+            'goal_direction': np.cos(angle)
+        }
+
+# DirectionBonus not tested
+class DirectionBonus(gym.core.Wrapper):
+    """
+    Add a bonus if the step was towards the goal.
+    """
+
+    def __init__(self, env):
+        super().__init__(env)
+
+    def step(self, action):
+        obs, reward, done, info = self.env.step(action)
+
+        if action == self.unwrapped.Actions.forward:
+            if obs['goal_direction'] > 0:
+                reward += 0.05
+        else:
+            reward -= 0.1
+
+        if done:
+            reward = 10
+            
+        return obs, reward, done, info
+
+    def reset(self, **kwargs):
+        return self.env.reset(**kwargs)
